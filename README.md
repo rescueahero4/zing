@@ -29,7 +29,7 @@ The two halves talk over one contract, the **Batch Spec** (ARCH §3):
 | **Expo Go** | On the phone you'll demo from — [iOS](https://apps.apple.com/app/expo-go/id982107779) / [Android](https://play.google.com/store/apps/details?id=host.exp.exponent). No Xcode or Android Studio needed. |
 | **Anthropic API key** | Extractor, Researcher, Planner, Writers, Encourager. |
 | **fal.ai key** | Slide illustrations (Flux schnell). |
-| **ElevenLabs key** | Per-slide narration. |
+| **ElevenLabs key** | Per-slide narration. The voice ids in `ELEVENLABS_VOICE_IDS` must exist **on that account** — stock ids are not universal. |
 | **Vercel Blob token** | Optional but do it before a demo — see [Audio hosting](#audio-hosting). |
 
 No keys yet? Skip to [Quick start without keys](#quick-start-without-keys) — the
@@ -38,6 +38,49 @@ whole pipeline runs stubbed.
 ---
 
 ## Quick start
+
+Steps 1 and 4 below are one-time setup. After that, **one command runs the whole
+stack**:
+
+```powershell
+.\scripts\dev.ps1              # live keys — this run costs money
+.\scripts\dev.ps1 -Mock        # canned agents, no keys, no spend
+```
+
+```sh
+./scripts/dev.sh --mock        # macOS / Linux, same switches as --long-flags
+```
+
+It starts the API in its own window, detects this machine's LAN address,
+rewrites the one line in `mobile/.env` that points the app at it, waits for the
+API to answer, then starts Expo **in the current terminal** so the QR code keeps
+the TTY its keyboard menu needs. Scan the QR with Expo Go. Ctrl-C stops both.
+
+| Switch | What it does |
+| --- | --- |
+| `-Mock` / `--mock` | `ZING_MOCK=1` — canned agents, no spend |
+| `-Chaos` / `--chaos` | `ZING_MOCK=chaos` — the four injected failures; a healthy run is 3 groups |
+| `-Tunnel` / `--tunnel` | Expo `--tunnel`. Tunnels **Metro only** — the phone still needs LAN access to the API |
+| `-ApiOnly` / `--api-only` | Backend only, in this window |
+| `-Clear` / `--clear` | Force a Metro cache reset |
+| `-CheckOnly` / `--check-only` | Preflight and sync `mobile/.env`, start nothing. Run this after moving networks |
+
+Three things it does that are easy to miss:
+
+- **It refuses to start when port 3000 is occupied.** A leftover `next dev`
+  answers in whatever mode *it* was started with, so a run against it proves
+  nothing — including which of your `.env.local` edits it actually loaded. Kill
+  the PID it names.
+- **It re-detects the LAN address every run**, because that address is not
+  stable and the phone cannot reach `localhost`.
+  `EXPO_PUBLIC_ZING_API_URL` is baked into the bundle at build time, so the
+  script passes `--clear` whenever it had to change the value. If you edit
+  `mobile/.env` by hand, pass `-Clear` yourself or Metro will serve the old URL.
+- **It checks the API answers on that LAN address**, which is what catches
+  Windows Firewall blocking inbound Node. Note the limit of that check: an
+  address assigned to a local interface answers over loopback whether or not
+  anything outside the machine can reach it, so it proves the address exists —
+  not that the phone can use it.
 
 ### 1. Backend
 
@@ -160,6 +203,43 @@ over cellular; `--lan` needs the phone and laptop on the same network.
 
 Restart Metro after editing `.env` — the value is baked in at bundle time.
 
+For local development you do not have to fill this in by hand: `scripts/dev.ps1`
+overwrites this one line with the detected LAN address on every run. Set it
+manually only for the deployed URL, which the script leaves alone because it
+only rewrites the *active* `EXPO_PUBLIC_ZING_API_URL` line.
+
+---
+
+## Is it actually working?
+
+You cannot tell a real batch from the fallback by looking at the phone. These
+two read almost identically on screen, and the second is ambiguous on its own:
+
+| Title on screen | What it means |
+| --- | --- |
+| `Fractions + animal habitats` | **`ZING_MOCK` run succeeded** — canned agents |
+| `Fractions + animal habitats + water cycle` | either a **live run on `fixtures/worksheet.*`**, or the **bundled fallback** |
+
+The overlap is not a coincidence: the fallback batch was generated from the
+committed fixture, so a successful live run on that fixture produces the same
+title character for character. Three consequences worth internalising before you
+debug anything:
+
+- **`ZING_MOCK` ignores your worksheet entirely.** Photograph any page you like;
+  a mock run always returns fractions and habitats. That is correct behaviour,
+  not a failure to read the page.
+- **Mock never calls Anthropic, fal or ElevenLabs.** A key problem, a dead voice
+  ID or an expired credit cannot show up in a mock run, and a mock run cannot
+  prove any of them work.
+- **The only reliable signal is the Metro console.** A genuine fallback prints
+  exactly one line, and it names the stage that failed:
+
+  ```
+  [zing] pipeline fell back — extract failed: {"error":"..."}
+  ```
+
+  No such line means the pipeline completed, whatever the title says.
+
 ---
 
 ## Quick start without keys
@@ -205,6 +285,13 @@ assets   images 5/6 · audio 5/6
 ---
 
 ## Commands
+
+Run from the repo root — these are the ones you use day to day:
+
+| Command | What it does |
+| --- | --- |
+| `.\scripts\dev.ps1` / `./scripts/dev.sh` | API + Expo together, LAN address synced. Switch table in [Quick start](#quick-start) |
+| `.\scripts\dev.ps1 -CheckOnly` | Re-detect the LAN address and sync `mobile/.env` without starting anything |
 
 Run from `api/`:
 
@@ -268,16 +355,29 @@ the phone asks for it. Set the Blob token before a demo.
 ## Before a demo
 
 1. Run `npm run smoke` cleanly on the demo worksheet at `on-level`, then again
-   at `challenge`.
-2. Bundle the resulting images and audio into the app:
+   at `challenge`. **Without `ZING_MOCK`** — a mock run exercises none of the
+   three providers and so proves nothing about your keys.
+2. Validate every id in `ELEVENLABS_VOICE_IDS` against *your* account. Stock
+   voice ids are account-scoped and a wrong one fails per slide, which degrades
+   to a silent slide rather than an error you will notice:
+
+   ```sh
+   curl -s -o /dev/null -w '%{http_code}\n' \
+     -H "xi-api-key: $ELEVENLABS_API_KEY" \
+     https://api.elevenlabs.io/v1/voices/<voice-id>
+   ```
+
+   `200` is good; `400 voice_not_found` means that voice is not yours. List what
+   is: `GET https://api.elevenlabs.io/v2/voices?page_size=100`.
+3. Bundle the resulting images and audio into the app:
    `npm run bundle:fallbacks -- ./batch-on-level.json`. fal and ElevenLabs URLs
    expire, so save the files, not the links — see
    [`mobile/src/assets/fallback/README.md`](mobile/src/assets/fallback/README.md).
-3. Only if you deploy: confirm `BLOB_READ_WRITE_TOKEN` is set — it is the one
+4. Only if you deploy: confirm `BLOB_READ_WRITE_TOKEN` is set — it is the one
    audio path that survives a serverless cold start ([Audio hosting](#audio-hosting)).
    The demo currently runs the API locally instead ([docs/TODO.md](docs/TODO.md)),
    where the in-process store is fine.
-4. Rehearse on the network you will demo on, with the phone on the **same LAN**
+5. Rehearse on the network you will demo on, with the phone on the **same LAN**
    as the laptop. `--tunnel` tunnels Metro, not the API — on cellular the phone
    cannot reach a local API and every run silently falls back. See
    [docs/DEMO.md](docs/DEMO.md).
@@ -298,6 +398,30 @@ the phone asks for it. Set the Blob token before a demo.
 | Compose returns 502 `only N valid group(s)` | Writers produced fewer than 3 valid groups. The server log names each one it dropped and why. |
 | Metro can't resolve a module after `npm install` | `npx expo start --clear`. |
 | Vercel build fails with no framework detected | Root Directory is not set to `api`. There is no root `package.json`. |
+| Every stage hangs, then the bundled batch appears ~90s later | The phone cannot reach `EXPO_PUBLIC_ZING_API_URL` at all, so each `fetch` sits there until the deadline aborts it. Almost always the wrong LAN address — see [When the laptop has more than one address](#when-the-laptop-has-more-than-one-address). |
+| ElevenLabs `voice_not_found` / every slide silent on a live run | A voice id in `ELEVENLABS_VOICE_IDS` does not exist **on your account**. Stock ids are not universal — validate them before a demo (see [Before a demo](#before-a-demo)). Note `.env.local` overrides `DEFAULT_VOICE_IDS`, so fixing the code alone changes nothing. |
+| A `.env.local` fix appears to do nothing on a live run | Check the API is not still running with `-Mock`. Mock short-circuits every outbound call, so no key, voice id or credit problem can surface — and none can be proven fixed. |
+
+### When the laptop has more than one address
+
+A laptop on Ethernet **and** Wi-Fi at the same time has two addresses, often on
+the same subnet. Metro advertises one of them; if `mobile/.env` names the other,
+the app loads fine and then hangs on every API call — the most confusing version
+of this failure, because the bundle downloading is itself proof that *some*
+address works.
+
+`scripts/dev.ps1` resolves this by asking the OS which local address it actually
+sources outbound traffic from (`Find-NetRoute`), which is the same answer Expo
+uses, so the two cannot disagree. Two ways it still goes wrong:
+
+- **An adapter that drops keeps its address and its default route.** The script
+  skips interfaces that are not `Up` for exactly this reason, but if it wrote
+  `mobile/.env` *before* the drop, rerun it (`-CheckOnly` is enough).
+- **AP/client isolation on the Wi-Fi SSID** stops the phone reaching the
+  laptop's *wireless* address, while its wired address still works through the
+  router. Check with `Get-NetNeighbor -IPAddress <phone-ip>`: an all-zero MAC
+  and `Unreachable` on an interface means no client-to-client traffic on that
+  segment. Turn off AP isolation, or just use the address the script picked.
 
 ---
 

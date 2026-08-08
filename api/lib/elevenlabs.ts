@@ -21,10 +21,15 @@ const MODEL_ID = 'eleven_flash_v2_5';
 const OUTPUT_FORMAT = 'mp3_44100_128';
 
 /**
- * Stock pool — "Rachel" and "Adam". Override with ELEVENLABS_VOICE_IDS (a
+ * Stock pool — four teacher voices. Override with ELEVENLABS_VOICE_IDS (a
  * comma-separated list) so swapping or adding teachers needs no code change.
  */
-const DEFAULT_VOICE_IDS = ['21m00Tcm4TlvDq8ikWAM', 'pNInz6obpgDQGcFmaJgB'];
+const DEFAULT_VOICE_IDS = [
+  'Xb7hH8MSUJpSbSDYk0k2', // Alice — clear, engaging educator (British)
+  'Rsz5u2Huh1hPlPr0oxRQ', // Josh — slow, natural, calm (American)
+  'hpp4J3VqNfWAUOO0d1Us', // Bella — professional, bright, warm (American)
+  'JBFqnCBsd6RMkjVDRZzb', // George — warm, captivating storyteller (British)
+];
 
 export const AUDIO_CONTENT_TYPE = 'audio/mpeg';
 

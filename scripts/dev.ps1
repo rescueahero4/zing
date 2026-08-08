@@ -100,8 +100,50 @@ if ($null -ne $Occupied) {
 
 # Pick the IPv4 address on the interface that actually carries the default
 # route, so a VPN or a docker/WSL bridge does not win over Wi-Fi.
+#
+# Only interfaces that are *Up* are eligible. A disconnected adapter keeps both
+# its last address and its default route, so route metric alone will happily
+# return an address nothing answers on. That failure is silent and expensive:
+# every check from this machine still passes, because an address assigned to a
+# local interface answers over loopback whether or not the adapter is carrying
+# traffic - so the phone is the only thing that can tell, and all it shows is a
+# pipeline that hangs on the first stage and falls back 90s later.
 function Get-LanAddress {
+    # First, ask the stack the same question the phone's traffic will ask:
+    # which local address does Windows actually source outbound traffic from?
+    #
+    # This matters when the laptop is on one network twice - a dock's Ethernet
+    # and Wi-Fi, both on the same router, as here. Both interfaces then carry a
+    # default route at the same metric, so sorting by metric alone picks between
+    # them by input order, which is a coin flip. Expo meanwhile advertises the
+    # OS's preferred address. When the two disagree the phone loads the bundle
+    # from one address and is told to call the API on the other - and the reply
+    # to that second address egresses the *other* NIC while still carrying the
+    # first NIC's source IP, so the handshake never completes and every stage
+    # hangs until the 90s deadline. Find-NetRoute resolves the tie exactly as
+    # the kernel does, which is exactly what Expo will advertise.
+    $preferred = Find-NetRoute -RemoteIPAddress '8.8.8.8' -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.IPAddress -match '^\d{1,3}(\.\d{1,3}){3}$' -and
+            $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'
+        } |
+        Select-Object -First 1 -ExpandProperty IPAddress
+    if ($preferred) { return $preferred }
+
+    # Fallbacks, for a machine with no route off the LAN at all. Only adapters
+    # that are Up are eligible: a disconnected one keeps its last address and
+    # its default route, and every check from this machine would still pass,
+    # because a locally-assigned address answers over loopback whether or not
+    # the adapter carries traffic.
+    $up = @(
+        Get-NetAdapter -ErrorAction SilentlyContinue |
+            Where-Object { $_.Status -eq 'Up' } |
+            Select-Object -ExpandProperty ifIndex
+    )
+    if ($up.Count -eq 0) { return $null }
+
     $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+        Where-Object { $up -contains $_.ifIndex } |
         Sort-Object RouteMetric, ifMetric |
         Select-Object -First 1
     if ($null -ne $route) {
@@ -111,7 +153,10 @@ function Get-LanAddress {
         if ($null -ne $addr) { return $addr.IPAddress }
     }
     $fallback = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
+        Where-Object {
+            $up -contains $_.InterfaceIndex -and
+            $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'
+        } |
         Select-Object -First 1
     if ($null -ne $fallback) { return $fallback.IPAddress }
     return $null
