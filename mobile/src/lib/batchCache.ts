@@ -74,6 +74,26 @@ export function batchCacheKey(
   return fingerprint ? `${fingerprint}:${difficulty}` : null;
 }
 
+/**
+ * One fingerprint for a whole upload set, since an upload is now any number of
+ * photos and PDFs (see `mediaTray.ts`) and the batch they produce belongs to all
+ * of them together.
+ *
+ * Order-sensitive on purpose: the tray's order is the order S1 reads the pages
+ * in, so front-then-back is not the same input as back-then-front and must not
+ * share a cache entry. A single unhashable item poisons the whole set — one page
+ * we cannot pin means we cannot claim the batch matches what was sent, which the
+ * cache reads as "do not cache" and simply runs the pipeline.
+ */
+export function combineFingerprints(
+  fingerprints: (string | undefined)[],
+): string | undefined {
+  if (fingerprints.length === 0) return undefined;
+  if (fingerprints.some((fingerprint) => !fingerprint)) return undefined;
+  if (fingerprints.length === 1) return fingerprints[0];
+  return `set${fingerprints.length}-${fingerprints.join('+')}`;
+}
+
 export async function readCachedBatch(key: string): Promise<BatchSpec | null> {
   const entries = await loadEntries();
   return entries.find((entry) => entry.key === key)?.batch ?? null;

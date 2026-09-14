@@ -31,11 +31,11 @@ export default function App() {
   const [result, setResult] = useState<PipelineResult | null>(null);
   const [harderBusy, setHarderBusy] = useState(false);
 
-  const onWorksheet = useCallback(async (source: WorksheetSource, difficulty: Difficulty) => {
+  const onWorksheet = useCallback(async (sources: WorksheetSource[], difficulty: Difficulty) => {
     setStage('extract');
     setMode('generating');
 
-    const pipelineResult = await runPipeline({ source, difficulty, onStage: setStage });
+    const pipelineResult = await runPipeline({ sources, difficulty, onStage: setStage });
 
     // Fresh batch or bundled fallback, the Generating screen finishes its
     // animation either way — the child never sees the seam.

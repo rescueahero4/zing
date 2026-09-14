@@ -10,7 +10,7 @@ Everything builds from Windows; Expo Go runs the app on the phone from a QR code
 
 ```
 Expo Go on phone (RN + TypeScript)
- ├─ Capture      camera / PDF picker, difficulty selector
+ ├─ Capture      camera / photos / PDF into one tray, difficulty selector
  ├─ Generating   drives pipeline stages, narrates each agent as it runs
  ├─ BatchPlayer  vertical pager: lesson pages + quiz pages + scorecard
  ├─ ScoreCard    confetti, score, subjects, encouragement, Make it harder
@@ -18,7 +18,7 @@ Expo Go on phone (RN + TypeScript)
         │  HTTPS
         ▼
 Vercel serverless (Next.js API routes; ANTHROPIC / FAL / ELEVENLABS keys)
- ├─ POST /api/extract     Extractor: vision or PDF → topics, problems, grade band
+ ├─ POST /api/extract     Extractor: 1..8 pages, vision and/or PDF → topics, problems, grade band
  ├─ POST /api/research    Researcher swarm: ≤3 parallel calls, web_search on
  ├─ POST /api/compose     Planner → parallel Lesson & Quiz Writers → Encourager
  ├─ POST /api/assets      fan-out: fal image per slide ‖ ElevenLabs clip per slide
@@ -32,7 +32,7 @@ The app is the Orchestrator's hands: it calls stages sequentially, passes output
 
 ## 2. Agent Pipeline
 
-**S1 `/api/extract` — Extractor** (1 Claude call; image or native PDF `document` block, ≤100pp/32MB): subjects, concrete problems, grade-band estimate, handwriting best-guess. K-12 curriculum framing.
+**S1 `/api/extract` — Extractor** (1 Claude call over 1–8 pages, each an image or a native PDF `document` block, ≤100pp/32MB; ≤4.5MB of base64 per request): subjects, concrete problems, grade-band estimate, handwriting best-guess. K-12 curriculum framing. The pages are one worksheet gathered from any mix of sources (§1 Capture), labelled "Page N of M" and read together in a single call, so the ≤3 topics are chosen across the set rather than merged after the fact.
 
 **S2 `/api/research` — Researcher swarm** (≤3 parallel calls, web_search): per topic — grade-band concepts, **misconceptions** (→ Challenge distractors), fun facts (→ lesson hooks).
 

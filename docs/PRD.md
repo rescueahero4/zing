@@ -67,8 +67,8 @@ Score (n/N), streak, subject-matter chips ("Math · Fractions", "Science · Habi
 
 ## 6. User Flow
 
-1. Open Zing → **Snap homework** (camera) or **Upload PDF**
-2. Pick difficulty (default On-level)
+1. Open Zing → pick difficulty (default On-level)
+2. Add the homework — camera, camera roll, PDF, in any mix — check the tray, drop what you don't want, then **Zing it** once
 3. Generating screen: swarm status narration (batch starts < 45s)
 4. Swipe the batch: lessons play (Ken Burns + tilt parallax + narration lit word by word, auto-advance), quiz pages interrupt and lock until answered
 5. All questions answered → **ScoreCard** (confetti, subjects, encouragement) → auto-saved
@@ -76,7 +76,7 @@ Score (n/N), streak, subject-matter chips ("Math · Fractions", "Science · Habi
 
 ## 7. Functional Requirements
 
-**F1 Capture** — `expo-image-picker` camera or `expo-document-picker` PDF (Anthropic ingests PDFs natively); on-device image downscale ≤1568px.
+**F1 Capture** — `expo-image-picker` camera and multi-select camera roll, `expo-document-picker` PDFs (Anthropic ingests PDFs natively), gathered into one tray of ≤8 pages from any mix of the three and sent in one request; on-device image downscale ≤1568px, done in the background as each page is added so the send button confirms rather than waits. A set that overflows the ~4MB request budget is resampled down a quality-then-resolution ladder (floor 1024px, WebP where the platform really supports it) rather than asking the parent to drop a page.
 **F2 Batch generation** — extract → research → plan+write (parallel writers) → assets (parallel fal + ElevenLabs). Validated (Zod) before serving; malformed questions dropped, ≥3 valid or fallback.
 **F3 Batch player** — vertical pager; slide pages auto-advance on audio end; quiz overlay cards with 4 native widgets; scroll lock during questions; prefetched images; mute + progress dots. The narration is drawn on the slide and lit **word by word against the audio** (ElevenLabs timestamps; static text when a clip has none), and the image, scrim and text move at different rates with device tilt and page scroll — a 2.5D parallax that keeps the screen alive between beats.
 **F4 ScoreCard** — confetti cannon, score, subject chips, banded encouragement, Make it harder (cached Challenge batch in demo).

@@ -1,6 +1,5 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { Animated, Easing, Image, StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { fill, slideFallbackTints, spacing } from '../theme';
 import { slideNarration, type NarrationClock } from '../lib/narration';
 import { NarrationText } from './NarrationText';
@@ -55,11 +54,6 @@ const SCROLL_Y_MAX = 26;
 const FG_TILT_X_MAX = 4;
 const FG_TILT_Y_MAX = 3;
 const FG_SCROLL_Y_MAX = 9;
-/** How far the scrim hangs past the bottom edge so its own travel never shows a seam. */
-const FG_OVERHANG = 18;
-
-const SCRIM_STOPS = ['transparent', 'rgba(4, 7, 10, 0.62)', 'rgba(4, 7, 10, 0.88)'] as const;
-const SCRIM_LOCATIONS = [0, 0.52, 1] as const;
 
 type Travel = Animated.AnimatedInterpolation<number>;
 
@@ -165,7 +159,7 @@ function LessonSlidePageImpl({
       </Animated.View>
 
       {/* Flat and still on purpose: a uniform fill has nothing to reveal by
-          moving, so only the gradient and the words below travel. */}
+          moving, so only the words below travel. */}
       <View style={styles.scrim} pointerEvents="none" />
 
       <Animated.View
@@ -175,21 +169,14 @@ function LessonSlidePageImpl({
         ]}
         pointerEvents="none"
       >
-        <LinearGradient
-          colors={SCRIM_STOPS}
-          locations={SCRIM_LOCATIONS}
-          style={styles.plate}
-          pointerEvents="none"
-        />
         <View
           style={[
             styles.narrationWrap,
-            // `FG_OVERHANG` is spent pushing the layer past the screen edge, so
-            // the gap the eye actually sees is the two terms after it: the home
-            // indicator plus one step of breathing room. The old fixed
-            // `spacing.xl * 2` was ~22pt more than that and left a dead band
-            // along the bottom of every slide.
-            { paddingBottom: FG_OVERHANG + Math.max(bottomInset, spacing.md) + spacing.md },
+            // The home indicator plus one step of breathing room, and nothing
+            // else: the gradient plate that used to hang past this edge is gone,
+            // so the words carry their own contrast (see `NarrationText`) and
+            // the illustration is left uncovered.
+            { paddingBottom: Math.max(bottomInset, spacing.md) + spacing.md },
           ]}
         >
           <NarrationText words={words} clock={active ? clock : null} timed={timings !== null} />
@@ -269,8 +256,7 @@ const styles = StyleSheet.create({
   page: {
     width: '100%',
     justifyContent: 'flex-end',
-    // The scaled image and the overhanging scrim must not bleed onto the
-    // neighbouring pages of the pager.
+    // The scaled image must not bleed onto the neighbouring pages of the pager.
     overflow: 'hidden',
   },
   imageLayer: { ...fill },
@@ -281,15 +267,7 @@ const styles = StyleSheet.create({
   },
   foreground: {
     ...fill,
-    bottom: -FG_OVERHANG,
     justifyContent: 'flex-end',
-  },
-  plate: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '72%',
   },
   narrationWrap: {
     paddingHorizontal: spacing.lg,

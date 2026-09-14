@@ -39,6 +39,82 @@ function tokenize(text: string): string[] {
   return trimmed ? trimmed.split(/\s+/) : [];
 }
 
+/** A half-open range over `words`: the tokens one chunk shows. */
+export interface NarrationChunk {
+  start: number;
+  /** Exclusive. */
+  end: number;
+}
+
+/**
+ * The most words a single chunk may hold. A narration runs 34–51 words, so this
+ * cuts the typical slide cleanly in half and only reaches for a third leg when
+ * the writer ran long — which is the point: the block on screen has to leave the
+ * illustration visible, not cover it.
+ */
+const MAX_CHUNK_WORDS = 18;
+
+/** How far a cut may be dragged off the even split to land on a full stop. */
+const SNAP_WINDOW = 3;
+
+/**
+ * The narration split into the pieces the slide shows one after another.
+ *
+ * Cuts are placed on an even division and then pulled onto the nearest sentence
+ * end within `SNAP_WINDOW`, preferring the earlier one — a chunk that ends on a
+ * full stop reads as a complete thought, where one that ends mid-clause reads as
+ * a bug. A narration short enough to fit already comes back as a single chunk.
+ */
+export function narrationChunks(words: string[]): NarrationChunk[] {
+  const total = words.length;
+  const count = Math.ceil(total / MAX_CHUNK_WORDS);
+  if (count <= 1) return [{ start: 0, end: total }];
+
+  const chunks: NarrationChunk[] = [];
+  let start = 0;
+
+  for (let i = 1; i < count; i++) {
+    // Leave at least one word for every chunk still to come, and at least one
+    // for this one, so no snap can produce an empty range.
+    const cut = snapToSentence(words, Math.round((total * i) / count), start + 1, total - (count - i));
+    chunks.push({ start, end: cut });
+    start = cut;
+  }
+  chunks.push({ start, end: total });
+
+  return chunks;
+}
+
+/** Which chunk holds `wordIndex`; the first one before the narration starts. */
+export function chunkIndexAt(chunks: NarrationChunk[], wordIndex: number): number {
+  if (wordIndex < 0) return 0;
+  for (let i = chunks.length - 1; i > 0; i--) {
+    if (wordIndex >= chunks[i].start) return i;
+  }
+  return 0;
+}
+
+function snapToSentence(words: string[], ideal: number, min: number, max: number): number {
+  const clamp = (value: number) => Math.min(max, Math.max(min, value));
+
+  for (let offset = 0; offset <= SNAP_WINDOW; offset++) {
+    const candidates = offset === 0 ? [ideal] : [ideal - offset, ideal + offset];
+    for (const candidate of candidates) {
+      if (candidate < min || candidate > max) continue;
+      if (endsSentence(words[candidate - 1])) return candidate;
+    }
+  }
+
+  return clamp(ideal);
+}
+
+/** Terminator, optionally behind a closing quote or bracket. */
+const SENTENCE_END = /[.!?…]["'”’)\]]*$/;
+
+function endsSentence(word: string | undefined): boolean {
+  return word !== undefined && SENTENCE_END.test(word);
+}
+
 /**
  * Index of the last word whose start has passed, or `-1` before the first one.
  *

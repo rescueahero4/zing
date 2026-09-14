@@ -118,6 +118,9 @@ Two synthetic worksheets are committed for exactly this — see
 ```sh
 npm run smoke -- ./fixtures/worksheet.jpg on-level
 npm run smoke -- ./fixtures/worksheet.pdf challenge
+
+# Several files are one worksheet, the way the app's tray sends them
+npm run smoke -- ./fixtures/worksheet.jpg ./fixtures/worksheet.pdf on-level
 ```
 
 Shape of the output — the timings below are a `ZING_MOCK=1` run, so they measure
@@ -300,7 +303,7 @@ Run from `api/`:
 | `npm run dev` | Dev server on :3000 |
 | `npm run build` | Production build (also the deploy gate) |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run smoke -- <file> [difficulty]` | Drive S1→S4, print timings, write the batch |
+| `npm run smoke -- <file…> [difficulty]` | Drive S1→S4, print timings, write the batch; several files go up as one worksheet |
 | `npm run bundle:fallbacks -- <batch.json> [name]` | Download that batch's images and audio into the app and rewire the fallback spec — the ARCH §5 insurance |
 | `npm run validate:fallbacks` | Check the three demo batches against the schema (two are app-bundled; reports clips on disk) |
 | `npm run make:chime` | Re-synthesise `mobile/src/assets/chime.wav` (the committed file is the artefact; only re-run to change the notes) |
@@ -323,7 +326,7 @@ bundled fallback batch on any failure.
 
 | Stage | Route | Agents |
 | --- | --- | --- |
-| S1 | `POST /api/extract` | Extractor — vision or native PDF → subjects, problems, grade band |
+| S1 | `POST /api/extract` | Extractor — 1–8 pages, vision and/or native PDF → subjects, problems, grade band |
 | S2 | `POST /api/research` | Researcher swarm — ≤3 parallel calls, `web_search` on |
 | S3 | `POST /api/compose` | Planner → Lesson Writers ‖ Quiz Writers ‖ Encourager → validated Batch Spec |
 | S4 | `POST /api/assets` | fal Flux schnell ‖ ElevenLabs, full fan-out |
@@ -443,7 +446,16 @@ uses, so the two cannot disagree. Two ways it still goes wrong:
 - **`expo-image-manipulator`** is the one dependency not named in ARCH. Camera
   photos are resized to 1568px on the long edge before base64-encoding: a raw
   12MP photo encodes to ~8MB, over Vercel's request-body limit, and Claude's
-  vision path downsamples past that width anyway.
+  vision path downsamples past that width anyway. A tray of pages can still
+  overflow the 4MB request budget, so `mobile/src/lib/worksheet.ts` carries a
+  five-rung resampling ladder (quality first, then resolution, floor 1024px) and
+  `mediaTray.ts` walks the biggest page down it — re-encoding from the original
+  each time, never from the previous rung — until the set measures under budget.
+  Encoding prefers WebP for the ~25-30% it saves, but the first result is
+  verified by its magic bytes and falls back to JPEG for the session if the
+  platform did not really produce one: `mediaType` is a promise to the API, and
+  Anthropic rejects a mismatch, which would surface as the whole batch dropping
+  to the fallback.
 - **Make it harder** serves the pre-cached Challenge batch, as ARCH §5
   specifies. The live path (compose + assets at level+1, reusing the extraction
   and research already paid for) is implemented behind `LIVE_MAKE_IT_HARDER` in

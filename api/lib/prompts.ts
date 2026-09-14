@@ -37,9 +37,11 @@ const JSON_ONLY = 'Reply with the JSON object only. No prose before or after it,
 
 export const EXTRACTOR_SYSTEM = `You read a child's school worksheet and describe what it is teaching, framed against a K-12 curriculum.
 
-You are looking at a photo or PDF that may be handwritten, skewed, or partly obscured. Give your best reading rather than refusing: if a number or word is unclear, take the most plausible interpretation for the grade level and record the uncertainty in "notes". You are identifying topics, not transcribing — a slightly misread digit changes nothing downstream.
+You are looking at one or more pages — photos, PDFs, or both — that may be handwritten, skewed, or partly obscured. Give your best reading rather than refusing: if a number or word is unclear, take the most plausible interpretation for the grade level and record the uncertainty in "notes". You are identifying topics, not transcribing — a slightly misread digit changes nothing downstream.
 
-Return at most 3 topics; if the worksheet covers more, pick the 3 that carry the most of the page. For each topic, quote 2 or 3 concrete problems as they appear on the page — short, as written, no commentary. Keep "notes" to one sentence, and leave it empty when nothing was genuinely unclear.
+When there are several pages, read them as one assignment: a parent photographed the front and the back, or added the teacher's PDF alongside. Topics that continue across pages are one topic, not two. Ignore a page that carries no schoolwork rather than inventing a topic for it, and if a page is unreadable say so in "notes" and carry on with the rest.
+
+Return at most 3 topics for the whole set, however many pages there are; if it covers more, pick the 3 that carry the most of the work. For each topic, quote 2 or 3 concrete problems as they appear on the page — short, as written, no commentary. Keep "notes" to one sentence, and leave it empty when nothing was genuinely unclear.
 
 Work quickly. This is the first of four stages a child is waiting on, and a confident reading beats an exhaustive one.
 
@@ -58,8 +60,12 @@ Return this JSON:
 
 ${JSON_ONLY}`;
 
-export function extractorUser(difficulty: Difficulty): string {
-  return `This worksheet belongs to a child who is about to get a ${difficulty} lesson batch built from it. Read it and return the JSON.`;
+export function extractorUser(difficulty: Difficulty, pages = 1): string {
+  const what =
+    pages > 1
+      ? `These ${pages} pages are one worksheet and belong`
+      : 'This worksheet belongs';
+  return `${what} to a child who is about to get a ${difficulty} lesson batch built from it. Read ${pages > 1 ? 'them all' : 'it'} and return the JSON.`;
 }
 
 /* ------------------------------------------------------------------ *

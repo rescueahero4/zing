@@ -1,7 +1,13 @@
 import { Image } from 'react-native';
 import type { BatchSpec, Difficulty } from '../types/batch';
 import { getChallengeBatch, getFallbackBatch } from './fallback';
-import { batchCacheKey, cachedMediaIsLive, readCachedBatch, writeCachedBatch } from './batchCache';
+import {
+  batchCacheKey,
+  cachedMediaIsLive,
+  combineFingerprints,
+  readCachedBatch,
+  writeCachedBatch,
+} from './batchCache';
 
 /**
  * The app is the Orchestrator's hands (ARCH §1): it calls the four stages in
@@ -47,12 +53,20 @@ export interface PipelineResult {
   fromCache?: boolean;
   /** Kept so **Make it harder** can re-run compose+assets at level+1. */
   context?: { extraction: unknown; research: unknown };
-  /** Kept so **Make it harder** can find this worksheet's cached Challenge batch. */
+  /**
+   * Kept so **Make it harder** can find this worksheet's cached Challenge batch.
+   * For a multi-page upload this is the whole set's combined fingerprint.
+   */
   sourceFingerprint?: string;
 }
 
 export interface RunPipelineOptions {
-  source: WorksheetSource;
+  /**
+   * Every page the parent staged, in tray order — one worksheet, gathered from
+   * whatever mix of camera, camera roll and PDF they had (see `mediaTray.ts`).
+   * S1 reads them together, so page order is content and is preserved.
+   */
+  sources: WorksheetSource[];
   difficulty: Difficulty;
   onStage?: (stage: StageId) => void;
 }
@@ -122,6 +136,13 @@ export function prefetchSlideImages(batch: BatchSpec): void {
  */
 export const CACHE_REPLAY_STAGE_MS = 260;
 
+/** One staged item as S1's request body carries it. */
+function requestSource(source: WorksheetSource) {
+  return source.kind === 'pdf'
+    ? { kind: 'pdf' as const, data: source.data }
+    : { kind: 'image' as const, mediaType: source.mediaType ?? 'image/jpeg', data: source.data };
+}
+
 async function narrateCacheHit(onStage?: (stage: StageId) => void): Promise<void> {
   for (const entry of STAGE_SCRIPT) {
     onStage?.(entry.id);
@@ -131,11 +152,13 @@ async function narrateCacheHit(onStage?: (stage: StageId) => void): Promise<void
 }
 
 export async function runPipeline(options: RunPipelineOptions): Promise<PipelineResult> {
-  const { source, difficulty, onStage } = options;
+  const { sources, difficulty, onStage } = options;
+
+  const fingerprint = combineFingerprints(sources.map((source) => source.fingerprint));
 
   // Replay check first, and deliberately outside the 90s deadline below: a hit
   // costs one probe round-trip, and a miss should still get the full budget.
-  const cacheKey = batchCacheKey(source.fingerprint, difficulty);
+  const cacheKey = batchCacheKey(fingerprint, difficulty);
   if (cacheKey) {
     const cached = await readCachedBatch(cacheKey);
     if (cached && (await cachedMediaIsLive(cached))) {
@@ -145,7 +168,7 @@ export async function runPipeline(options: RunPipelineOptions): Promise<Pipeline
         batch: cached,
         usedFallback: false,
         fromCache: true,
-        sourceFingerprint: source.fingerprint,
+        sourceFingerprint: fingerprint,
       };
     }
   }
@@ -154,15 +177,10 @@ export async function runPipeline(options: RunPipelineOptions): Promise<Pipeline
   const deadline = setTimeout(() => controller.abort(), PIPELINE_DEADLINE_MS);
 
   try {
-    const sourceBody =
-      source.kind === 'pdf'
-        ? { pdf: { data: source.data } }
-        : { image: { mediaType: source.mediaType ?? 'image/jpeg', data: source.data } };
-
     onStage?.('extract');
     const { extraction } = await postStage<{ extraction: unknown }>(
       'extract',
-      { ...sourceBody, difficulty },
+      { sources: sources.map(requestSource), difficulty },
       controller.signal,
     );
 
@@ -197,7 +215,7 @@ export async function runPipeline(options: RunPipelineOptions): Promise<Pipeline
       batch,
       usedFallback: false,
       context: { extraction, research },
-      sourceFingerprint: source.fingerprint,
+      sourceFingerprint: fingerprint,
     };
   } catch (error) {
     console.warn('[zing] pipeline fell back —', error instanceof Error ? error.message : error);

@@ -4,10 +4,13 @@
  * dev server, prints per-stage timings against the ARCH §2 latency budget, and
  * writes the finished Batch Spec to disk.
  *
- *   npm run dev                                     # in one terminal
- *   npm run smoke -- ./worksheet.jpg on-level       # in another
+ *   npm run dev                                          # in one terminal
+ *   npm run smoke -- ./worksheet.jpg on-level            # in another
+ *   npm run smoke -- ./front.jpg ./back.jpg ./extra.pdf  # one worksheet, three pages
  *
- * Pass a .pdf and it goes down the document path instead of the vision path.
+ * Pass a .pdf and it goes down the document path instead of the vision path;
+ * pass several files and S1 reads them as one worksheet, the way the app's tray
+ * sends them.
  */
 import { readFile, writeFile } from 'node:fs/promises';
 import { extname, basename } from 'node:path';
@@ -29,6 +32,14 @@ const IMAGE_MEDIA_TYPES: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+async function readSource(path: string) {
+  const data = (await readFile(path)).toString('base64');
+  const extension = extname(path).toLowerCase();
+  return extension === '.pdf'
+    ? { kind: 'pdf', data }
+    : { kind: 'image', mediaType: IMAGE_MEDIA_TYPES[extension] ?? 'image/jpeg', data };
+}
+
 async function callStage<T>(stage: string, body: unknown): Promise<T> {
   const started = Date.now();
   const response = await fetch(`${BASE_URL}/api/${stage}`, {
@@ -49,28 +60,31 @@ async function callStage<T>(stage: string, body: unknown): Promise<T> {
   return payload as T;
 }
 
+const DIFFICULTIES = ['easy', 'on-level', 'challenge'];
+
 async function main() {
-  const [inputPath, difficultyArg] = process.argv.slice(2);
-  if (!inputPath) {
-    console.error('usage: npm run smoke -- <worksheet.jpg|worksheet.pdf> [easy|on-level|challenge]');
+  const args = process.argv.slice(2);
+  // Difficulty is optional and trails the files, so it is recognised by value
+  // rather than by position — otherwise a second file would be read as one.
+  const difficulty = args.length && DIFFICULTIES.includes(args[args.length - 1])
+    ? args.pop()!
+    : 'on-level';
+  const inputPaths = args;
+
+  if (inputPaths.length === 0) {
+    console.error(
+      'usage: npm run smoke -- <worksheet.jpg|worksheet.pdf> [more files…] [easy|on-level|challenge]',
+    );
     process.exit(1);
   }
-  const difficulty = difficultyArg ?? 'on-level';
 
-  const bytes = await readFile(inputPath);
-  const data = bytes.toString('base64');
-  const extension = extname(inputPath).toLowerCase();
+  const sources = await Promise.all(inputPaths.map(readSource));
 
-  const source =
-    extension === '.pdf'
-      ? { pdf: { data } }
-      : { image: { mediaType: IMAGE_MEDIA_TYPES[extension] ?? 'image/jpeg', data } };
-
-  console.log(`\nzing pipeline — ${basename(inputPath)} @ ${difficulty}\n`);
+  console.log(`\nzing pipeline — ${inputPaths.map((p) => basename(p)).join(' + ')} @ ${difficulty}\n`);
   const wallClockStart = Date.now();
 
   const { extraction } = await callStage<{ extraction: ExtractionLike }>('extract', {
-    ...source,
+    sources,
     difficulty,
   });
   const { research } = await callStage<{ research: ResearchLike }>('research', {
