@@ -21,6 +21,68 @@ The two halves talk over one contract, the **Batch Spec** (ARCH §3):
 
 ---
 
+## Stack
+
+| Layer | Choice |
+| --- | --- |
+| **App** | Expo SDK 54 · React Native 0.81 · React 19.1 · TypeScript 5.9, run in **Expo Go** |
+| **App libraries** | `expo-audio` (narration) · `expo-sensors` (tilt parallax) · `expo-image-picker` / `expo-document-picker` / `expo-image-manipulator` (capture) · `@react-native-community/slider` · `react-native-confetti-cannon` · AsyncStorage (history) |
+| **Backend** | Next.js 16 API routes only (no pages) · React 19.2 · Zod 4 for the Batch Spec · deployed on **Vercel** |
+| **LLM** | Anthropic SDK · `claude-sonnet-4-6` with vision, native PDF and `web_search`, `effort: low` on every agent |
+| **Images** | fal.ai **Flux schnell**, 720×1280 portrait |
+| **Voice** | ElevenLabs `eleven_flash_v2_5` with word timestamps (karaoke) |
+| **Audio hosting** | Vercel Blob → in-process store → `data:` URI |
+| **Tooling** | `tsx` scripts (smoke, fallback bundling, validation) · PowerShell / bash dev launcher |
+
+```mermaid
+flowchart LR
+    subgraph Phone["📱 Expo Go (React Native + TS)"]
+        Capture --> Generating --> Player["BatchPlayer"] --> ScoreCard
+        ScoreCard --> History[("AsyncStorage")]
+        Fallback[("Bundled fallback batch")]
+    end
+
+    subgraph Vercel["▲ Vercel — Next.js 16 API routes"]
+        Extract["/api/extract"]
+        Research["/api/research"]
+        Compose["/api/compose"]
+        Assets["/api/assets"]
+        Audio["/api/audio/:id"]
+    end
+
+    subgraph Providers["External providers"]
+        Claude["Anthropic<br/>Claude Sonnet 4.6"]
+        Fal["fal.ai<br/>Flux schnell"]
+        Eleven["ElevenLabs<br/>flash v2.5"]
+        Blob[("Vercel Blob")]
+    end
+
+    Generating -- HTTPS --> Extract & Research & Compose & Assets
+    Generating -. any failure / >90s .-> Fallback
+    Extract & Research & Compose --> Claude
+    Assets --> Fal & Eleven
+    Assets --> Blob
+    Player -. clips .-> Audio
+```
+
+Where the code lives (lines in tracked `.ts`/`.tsx`/`.md`/shell files at `59057f3`):
+
+```mermaid
+pie showData
+    title Lines by area
+    "mobile · lib" : 1701
+    "mobile · components" : 1408
+    "mobile · screens" : 1296
+    "mobile · types" : 112
+    "api · lib" : 1894
+    "api · routes" : 671
+    "api · scripts" : 1272
+    "docs" : 763
+    "dev scripts" : 690
+```
+
+---
+
 ## Prerequisites
 
 | | |
@@ -333,6 +395,76 @@ bundled fallback batch on any failure.
 | — | `GET /api/audio/<id>` | serves a clip the in-process store is holding — see [Audio hosting](#audio-hosting) |
 | — | `GET /api/fallback` | the cached demo batch, for curling during development; the app plays its bundled copy instead |
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as 📱 App (Generating)
+    participant X as /api/extract
+    participant R as /api/research
+    participant C as /api/compose
+    participant A as /api/assets
+    participant AI as Claude
+    participant P as fal ‖ ElevenLabs
+
+    App->>X: 1–8 pages (images / PDF)
+    X->>AI: Extractor (vision + document)
+    X-->>App: subjects, problems, grade band
+    App->>R: topics
+    par ≤3 topics
+        R->>AI: Researcher + web_search
+    end
+    R-->>App: concepts, misconceptions, fun facts
+    App->>C: extraction + research + difficulty
+    C->>AI: Planner (3–5 groups)
+    par per group
+        C->>AI: Lesson Writer
+    and
+        C->>AI: Quiz Writer
+    and
+        C->>AI: Encourager
+    end
+    C-->>App: Zod-validated Batch Spec
+    App->>A: Batch Spec
+    par ≤4 in flight per provider
+        A->>P: image per slide
+    and
+        A->>P: clip + word timings per slide
+    end
+    A-->>App: spec with imageUrl / audioUrl / narrationWords
+    Note over App: any error or >90s → bundled fallback batch
+```
+
+Latency budget per stage (ARCH §2 — the batch should start in under 45s):
+
+```mermaid
+xychart-beta
+    title "Stage budget (seconds)"
+    x-axis ["S1 extract", "S2 research", "S3 compose", "S4 assets"]
+    y-axis "seconds" 0 --> 16
+    bar [8, 15, 12, 15]
+```
+
+Batch limits the Planner has to stay inside: **≤12 slides**, **≤12 images**,
+**3–5 questions**, **≥3 distinct question types** (`slider`, `single`, `multi`,
+`order`), about **2 minutes** of narration.
+
+### The player
+
+The app flattens `groups` into one page list, `[...slides, quizPage] × groups,
+scoreCardPage`, and steps each page through this loop:
+
+```mermaid
+stateDiagram-v2
+    [*] --> playing: user tap (no autoplay)
+    playing --> playing: clip ends → next slide
+    playing --> question: quiz page (scroll locked)
+    question --> feedback: answer
+    feedback --> playing: correct → confetti + chime<br/>wrong → shake + explanation
+    playing --> scorecard: last group done
+    scorecard --> [*]: Done
+    scorecard --> playing: Make it harder
+```
+
 ### Audio hosting
 
 ElevenLabs returns raw bytes, but the app wants a URL. `api/lib/blob.ts` picks
@@ -347,6 +479,15 @@ one of three ways to give it one, in order of preference:
 3. **Neither** — the base64 `data:` URI ARCH §2.S4 allows as the POC path. Last
    resort: **iOS AVPlayer (behind `expo-audio`) does not reliably play `data:`
    URIs**, so this is the one that runs silent with captions.
+
+```mermaid
+flowchart TD
+    Clip["ElevenLabs mp3 bytes"] --> T{"BLOB_READ_WRITE_TOKEN?"}
+    T -- yes --> B["Vercel Blob URL<br/>✅ survives cold starts"]
+    T -- no --> H{"Host header?"}
+    H -- yes --> S["In-process store<br/>http://host/api/audio/id<br/>✅ fine for next dev"]
+    H -- no --> D["base64 data: URI<br/>⚠️ iOS may not play"]
+```
 
 Tier 2 is enough for local development, where `next dev` is a single long-lived
 process. It is not enough for a deployment: on Vercel each invocation may land in
